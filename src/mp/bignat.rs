@@ -389,7 +389,7 @@ impl<Scalar: PrimeField> BigNat<Scalar> {
         let delta_inv = AllocatedNum::alloc(cs.namespace(|| "delta_inv"), || {
             let delta = delta.get_value().unwrap();
 
-            if delta.is_zero().unwrap_u8() == 0 {
+            if delta.is_zero().unwrap_u8() == 1 {
                 Ok(Scalar::ONE) // we can return any number here, it doesn't matter
             } else {
                 Ok(delta.invert().unwrap())
