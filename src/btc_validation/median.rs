@@ -115,7 +115,7 @@ where
     let zero_shifted_cmp = num::Num::alloc(cs.namespace(|| "zero shift"), || {
         let mut cmp_val = a.get_value().unwrap();
         let b_value = b.get_value().unwrap();
-        let zero_shift = Scalar::from(2 << n_bits);
+        let zero_shift = Scalar::from_u128(2 << n_bits);
         cmp_val.add_assign(&zero_shift);
         cmp_val.sub_assign(&b_value);
 
