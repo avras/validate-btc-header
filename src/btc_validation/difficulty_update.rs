@@ -89,18 +89,23 @@ mod tests {
         // updated at block 798336 = 2016 * 396
         // therefore blocks 2016 * 395 to (2016 * 396 - 1) had difficulty = previous difficulty
         // hence t_sum = sum of timestamps of blocks 796320 (2016 * 395) to 798335
-        let tar_u: u128 = 0 as u128;
-        let tar_l: u128 = 53911173001054 as u128;
-        let prev_tar_u: u128 = 0 as u128;
-        let prev_tar_l: u128 = 50646206431058 as u128;
+        
+        // nbits of 800000th block = 0x17053894
+        // so target = 0x05 38940000000000000000000000000000
+        // nbits of 798000th block = 0x17058ebe
+        // so target = 0x05 8ebe0000000000000000000000000000
+        let tar_u: u128 = 0x05 as u128;
+        let tar_l: u128 = 0x38940000000000000000000000000000 as u128;
+        let prev_tar_u: u128 = 0x05 as u128;
+        let prev_tar_l: u128 = 0x8ebe0000000000000000000000000000 as u128;
 
         // Block 798336 timestamp 2023-07-12 07:59:39 GMT +5.5
         // Block 798335 timestamp 2023-07-12 07:57:41 GMT +5.5
         // Block 796320 timestamp 2023-06-29 04:18:35 GMT +5.5
         // Block 796319 timestamp 2023-06-29 04:16:06 GMT +5.5
-        // Difference is 13 days, 3 hrs, 41 min, 35 sec
-        // t_sum = 13 * 24 * 3600 + 3 * 3600 + 41 * 60 + 35 
-        let t_sum: u32 = (13 * 24 * 3600 + 3 * 3600 + 41 * 60 + 35) as u32;
+        // Difference is 13 days, 3 hrs, 39 min, 6 sec
+        // t_sum = 13 * 24 * 3600 + 3 * 3600 + 39 * 60 + 6 
+        let t_sum: u32 = (13 * 24 * 3600 + 3 * 3600 + 39 * 60 + 6) as u32;
         let _ = verify_difficulty_update(cs.namespace(|| "trivial"), 
                                         tar_u, 
                                         tar_l, 
