@@ -1,9 +1,10 @@
 use bellpepper::gadgets::boolean::AllocatedBit;
 use bellpepper::gadgets::boolean::Boolean;
-use bellpepper_core::{ConstraintSystem, SynthesisError, test_cs::TestConstraintSystem};
+use bellpepper_core::{ConstraintSystem, SynthesisError};
 use bellpepper::gadgets::num::{AllocatedNum, Num};
 use ff::PrimeField;
-use crate::util::num;
+use crate::BitAccess;
+use crate::OptionExt;
 use crate::mp::bignat::BigNat;
 
 pub fn compute_median_timestamp (prev_timestamps: &mut Vec<u32>) -> u32
@@ -34,7 +35,7 @@ CS: ConstraintSystem<Scalar>,
         let res_eq = BigNat::equals(cs.namespace(|| format!("check equal for time {}", i)), &fe_median, fe_time).unwrap();
         n_median_occurrences = n_median_occurrences.add_bool_with_coeff(CS::one(), &res_eq, Scalar::ONE);
 
-        let res_lt = less_than(&fe_median, fe_time, 32).unwrap();
+        let res_lt = less_than(cs.namespace(|| format!("res_lt {}", i)), &fe_median, fe_time, 32).unwrap();
 
         // delta_sign is the signum of (median - timestamp)
         let delta_sign = AllocatedNum::alloc(cs.namespace(|| format!("signum {}", i)), || {
@@ -69,7 +70,7 @@ CS: ConstraintSystem<Scalar>,
     }
     // absolute value of sign_diff needs to be obtained
     let const_12 = AllocatedNum::alloc(cs.namespace(|| "max positive sign_diff"), || Ok(Scalar::from(12u64))).unwrap();
-    let is_positive = less_than(&sign_diff, &const_12, 5usize).unwrap();
+    let is_positive = less_than(cs.namespace(|| "is_pos"), &sign_diff, &const_12, 32usize).unwrap();
     let neg_sign_diff = AllocatedNum::alloc(cs.namespace(|| "Negative of sign_diff"), || {
         let sign_val = sign_diff.get_value().unwrap();
         let mut zero_val = Scalar::ZERO;
@@ -93,42 +94,135 @@ CS: ConstraintSystem<Scalar>,
 
     let fe_median_occ = AllocatedNum::alloc(cs.namespace(|| "fe_median"), || Ok(n_median_occurrences.get_value().unwrap())).unwrap();
 
-    let r_eq = BigNat::equals(cs.namespace(|| "verify median"), &lhs, &fe_median_occ).unwrap();
-    let r_lt = less_than(&lhs, &fe_median_occ, 5).unwrap();
-    Boolean::or(cs.namespace(|| "less than or equal to check"), &r_eq, &r_lt)   
+    // let r_eq = BigNat::equals(cs.namespace(|| "verify median"), &lhs, &fe_median_occ).unwrap();
+    // let r_lt = less_than(cs.namespace(|| "lt"), &lhs, &fe_median_occ, 5).unwrap();
+    // Boolean::or(cs.namespace(|| "less than or equal to check"), &r_eq, &r_lt)
+    leq(cs.namespace(|| "median leq"), &lhs, &fe_median_occ, 32usize)
 }
 
 /// Takes two allocated numbers (a, b) and returns
 /// allocated boolean variable with value `true`
 /// if the `a` and `b` are such that a is strictly less than b, 
 /// `false` otherwise.
-pub fn less_than <Scalar> (
+pub fn less_than <Scalar, CS> (
+    mut cs: CS,
     a: &AllocatedNum<Scalar>,
     b: &AllocatedNum<Scalar>,
     n_bits: usize,
 ) -> Result<Boolean, SynthesisError>
 where
     Scalar: PrimeField,
+    CS: ConstraintSystem<Scalar>,
 {
-    let mut cs = TestConstraintSystem::<Scalar>::new();
-
-    let zero_shifted_cmp = num::Num::alloc(cs.namespace(|| "zero shift"), || {
+    let zero_shifted_cmp = AllocatedNum::alloc(cs.namespace(|| "zero shift"), || {
         let mut cmp_val = a.get_value().unwrap();
         let b_value = b.get_value().unwrap();
-        let zero_shift = Scalar::from_u128(2 << n_bits);
+
+        // Accomodating n_bits > 128 (i.e a and b atleast 128 bits)
+        let zero_shift = if n_bits <= 126 { 
+            Scalar::from_u128(2 << n_bits) 
+        } 
+        else { 
+            let shift1 = Scalar::from_u128(2 << (n_bits - 126));
+            let mut shift2 = Scalar::from_u128(2 << 126);
+            shift2.mul_assign(&shift1);
+            shift2
+        };
+
         cmp_val.add_assign(&zero_shift);
         cmp_val.sub_assign(&b_value);
 
         Ok(cmp_val)
     }).unwrap();
 
-    let _ = zero_shifted_cmp.fits_in_bits(cs.namespace(|| "check if fits"), n_bits + 1);
-    let boolean_r = cs.is_satisfied();
-    let r = AllocatedBit::alloc(cs.namespace(|| "r"), Some(boolean_r))?;
+    let n_bit_zero_cmp = AllocatedNum::alloc(cs.namespace(|| "n_bits zero cmp"), ||{
+        let mut exponent = Scalar::ONE;
+        let sc_two = Scalar::ONE + Scalar::ONE;
+        let cmp = zero_shifted_cmp.get_value();
 
-    Ok(Boolean::from(r))
+        let mut summ = Scalar::ZERO;
+        for i in 0..=n_bits{
+            let mut bit_i = if *cmp.grab()?.get_bit(i).grab()? {
+                Scalar::ONE
+            } else {
+                Scalar::ZERO
+            };
+            bit_i.mul_assign(&exponent);
+            summ.add_assign(&bit_i);
+            exponent.mul_assign(&sc_two);
+        }
+
+        Ok(summ)
+    }).unwrap();
+
+    BigNat::equals(cs.namespace(|| "check fits in n_bits"), &zero_shifted_cmp, &n_bit_zero_cmp)
+
+    // let _ = zero_shifted_cmp.fits_in_bits(cs.namespace(|| "check if fits"), n_bits + 1);
+    // let boolean_r = cs.is_satisfied();
+    // let r = AllocatedBit::alloc(cs.namespace(|| "r"), Some(boolean_r))?;
+
+    // Ok(Boolean::from(r))
+
 }
 
+/// Takes two allocated numbers (a, b) and returns
+/// allocated boolean variable with value `true`
+/// if the `a` and `b` are such that a is less than or equal to b, 
+/// `false` otherwise.
+pub fn leq <Scalar, CS> (
+    mut cs: CS,
+    a: &AllocatedNum<Scalar>,
+    b: &AllocatedNum<Scalar>,
+    n_bits: usize,
+) -> Result<Boolean, SynthesisError>
+where
+    Scalar: PrimeField,
+    CS: ConstraintSystem<Scalar>,
+{
+    let zero_shifted_cmp = AllocatedNum::alloc(cs.namespace(|| "zero shift leq"), || {
+        let mut cmp_val = a.get_value().unwrap();
+        let mut b_value = b.get_value().unwrap();
+        b_value.add_assign(Scalar::ONE);
+
+        // Accomodating n_bits > 128 (i.e a and b atleast 128 bits)
+        let zero_shift = if n_bits <= 126 { 
+            Scalar::from_u128(2 << n_bits) 
+        } 
+        else { 
+            let shift1 = Scalar::from_u128(2 << (n_bits - 126));
+            let mut shift2 = Scalar::from_u128(2 << 126);
+            shift2.mul_assign(&shift1);
+            shift2
+        };
+
+        cmp_val.add_assign(&zero_shift);
+        cmp_val.sub_assign(&b_value);
+
+        Ok(cmp_val)
+    }).unwrap();
+
+    let n_bit_zero_cmp = AllocatedNum::alloc(cs.namespace(|| "n_bits zero cmp leq"), ||{
+        let mut exponent = Scalar::ONE;
+        let sc_two = Scalar::ONE + Scalar::ONE;
+        let cmp = zero_shifted_cmp.get_value();
+
+        let mut summ = Scalar::ZERO;
+        for i in 0..=n_bits{
+            let mut bit_i = if *cmp.grab()?.get_bit(i).grab()? {
+                Scalar::ONE
+            } else {
+                Scalar::ZERO
+            };
+            bit_i.mul_assign(&exponent);
+            summ.add_assign(&bit_i);
+            exponent.mul_assign(&sc_two);
+        }
+
+        Ok(summ)
+    }).unwrap();
+
+    BigNat::equals(cs.namespace(|| "check fits in n_bits leq"), &zero_shifted_cmp, &n_bit_zero_cmp)
+}
 
 #[cfg(test)]
 mod tests {
@@ -184,7 +278,19 @@ mod tests {
         let c = AllocatedNum::alloc(cs.namespace(|| "c"), || Ok(Fr::from(11u64))).unwrap();
         let d = AllocatedNum::alloc(cs.namespace(|| "d"), || Ok(Fr::from(14u64))).unwrap();
         let n_bits: usize = 32;
-        let r2 = less_than(&c, &d, n_bits).unwrap().get_value().unwrap();
+        let r2 = less_than(cs.namespace(|| "r2"), &c, &d, n_bits).unwrap().get_value().unwrap();
+
+        assert_eq!(r2, true);
+    }
+
+    #[test]
+    fn test_less_than_equal() {
+        let mut cs = TestConstraintSystem::<Fr>::new();
+
+        let c = AllocatedNum::alloc(cs.namespace(|| "c"), || Ok(Fr::from(11u64))).unwrap();
+        let d = AllocatedNum::alloc(cs.namespace(|| "d"), || Ok(Fr::from(14u64))).unwrap();
+        let n_bits: usize = 32;
+        let r2 = leq(cs.namespace(|| "r2"), &c, &d, n_bits).unwrap().get_value().unwrap();
 
         assert_eq!(r2, true);
     }
