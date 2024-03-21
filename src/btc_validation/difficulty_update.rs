@@ -40,18 +40,23 @@ CS: ConstraintSystem<Scalar>,
     let t_sum_lower = AllocatedNum::alloc(cs.namespace(|| "Lower acceptable t_sum"), || Ok(Scalar::from(2016 * 10 * 60 / 4 as u64))).unwrap();
     let t_sum_upper = AllocatedNum::alloc(cs.namespace(|| "Upper acceptable t_sum"), || Ok(Scalar::from(2016 * 10 * 60 * 4 as u64))).unwrap();
 
-    let res_lower = median::less_than(&t_sum_lower, &fe_t_sum, 32).unwrap().get_value().unwrap();
-    let res_upper = median::less_than(&fe_t_sum, &t_sum_upper, 32).unwrap().get_value().unwrap();
+    let res_lower = median::less_than(cs.namespace(|| "res_lower"), &t_sum_lower, &fe_t_sum, 32).unwrap().get_value().unwrap();
+    let res_upper = median::less_than(cs.namespace(|| "res_upper"), &fe_t_sum, &t_sum_upper, 32).unwrap().get_value().unwrap();
     assert!(res_lower & res_upper);
     
-    // To verify if T_new * 2016 * 10 * 60 == t_sum * T_old
+    // // To verify if T_new * 2016 * 10 * 60 == t_sum * T_old
+    // let t_ideal_sum = num::Num::alloc(cs.namespace(|| "2016 * 10 * 60"), || Ok(Scalar::from(2016 * 10 * 60 as u64))).unwrap();
+    // let t_2016_10_60 = BigNat::from_num(cs.namespace(|| "BigNat t_ideal_sum"), t_ideal_sum, 64usize, 2usize).unwrap();
+
+    // let lhs = target.mult(cs.namespace(|| "T_new * 2016 * 10 * 60"), &t_2016_10_60).unwrap();
+    // let rhs = prev_target.mult(cs.namespace(|| "T_old * t_sum"), &t_sum).unwrap();
+
+    // lhs.equal(cs.namespace(|| "difficulty update verified"), &rhs).unwrap()
     let t_ideal_sum = num::Num::alloc(cs.namespace(|| "2016 * 10 * 60"), || Ok(Scalar::from(2016 * 10 * 60 as u64))).unwrap();
     let t_2016_10_60 = BigNat::from_num(cs.namespace(|| "BigNat t_ideal_sum"), t_ideal_sum, 64usize, 2usize).unwrap();
-
-    let lhs = target.mult(cs.namespace(|| "T_new * 2016 * 10 * 60"), &t_2016_10_60).unwrap();
-    let rhs = prev_target.mult(cs.namespace(|| "T_old * t_sum"), &t_sum).unwrap();
-
-    lhs.equal(cs.namespace(|| "difficulty update verified"), &rhs).unwrap()
+    
+    let (t_new, _t) =  prev_target.mult_mod(cs.namespace(|| "T_new compute"), &t_sum, &t_2016_10_60).unwrap();
+    target.equal(cs.namespace(|| "computation equal to next target"), &t_new).unwrap()
 }
 
 #[cfg(test)]
@@ -94,10 +99,17 @@ mod tests {
         // so target = 0x05 38940000000000000000000000000000
         // nbits of 798000th block = 0x17058ebe
         // so target = 0x05 8ebe0000000000000000000000000000
-        let tar_u: u128 = 0x05 as u128;
-        let tar_l: u128 = 0x38940000000000000000000000000000 as u128;
-        let prev_tar_u: u128 = 0x05 as u128;
-        let prev_tar_l: u128 = 0x8ebe0000000000000000000000000000 as u128;
+        // let tar_u: u128 = 0x05 as u128;
+        // let tar_l: u128 = 0x38940000000000000000000000000000 as u128;
+        // let tar_l: u128 = 0x3894871D1837E9E504B6B1D1837E9E50 as u128;
+        // calc. target = 0x5 3894871D1837E9E504B6B1D1837E9E50
+        // let prev_tar_u: u128 = 0x05 as u128;
+        // let prev_tar_l: u128 = 0x8ebe0000000000000000000000000000 as u128;
+        let prev_tar_u = 0;
+        let prev_tar_l = 0x058ebe as u128;
+        let tar_u = 0u128;
+        let tar_l: u128 = 0x053894 as u128;
+
 
         // Block 798336 timestamp 2023-07-12 07:59:39 GMT +5.5
         // Block 798335 timestamp 2023-07-12 07:57:41 GMT +5.5
