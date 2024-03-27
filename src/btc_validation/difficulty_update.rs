@@ -84,9 +84,9 @@ CS: ConstraintSystem<Scalar>,
     let t_sum_lower = AllocatedNum::alloc(cs.namespace(|| "Lower acceptable t sum"), || Ok(Scalar::from(2016 * 10 * 60 / 4 as u64))).unwrap();
     let t_sum_upper = AllocatedNum::alloc(cs.namespace(|| "Upper acceptable t sum"), || Ok(Scalar::from(2016 * 10 * 60 * 4 as u64))).unwrap();
 
-    let res_lower = median::less_than(cs.namespace(|| "res lower"), &t_sum_lower, sum_timestamps, 32).unwrap().get_value().unwrap();
-    let res_upper = median::less_than(cs.namespace(|| "res upper"), sum_timestamps, &t_sum_upper, 32).unwrap().get_value().unwrap();
-    assert!(res_lower & res_upper);
+    let res_lower = median::less_than(cs.namespace(|| "res lower"), &t_sum_lower, sum_timestamps, 32)?;
+    let res_upper = median::less_than(cs.namespace(|| "res upper"), sum_timestamps, &t_sum_upper, 32)?;
+    assert!(res_lower.get_value().or(Some(true)).unwrap() & res_upper.get_value().or(Some(true)).unwrap());
 
     let t_ideal_sum = num::Num::alloc(cs.namespace(|| "2016 * 10 * 60 or 2 weeks"), || Ok(Scalar::from(2016 * 10 * 60 as u64))).unwrap();
     let t_2016_10_60 = BigNat::from_num(cs.namespace(|| "BigNat t ideal sum"), t_ideal_sum, 128usize, 1usize).unwrap();

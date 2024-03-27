@@ -179,7 +179,7 @@ where
 
         // equality check
         let r_prev_hash = BigNat::equals(cs.namespace(|| {"Is prev. hash from current block equal to the last block hash?"}), &z_i[0], &prev_hash).unwrap();
-        assert!(r_prev_hash.get_value().unwrap());
+        assert!(r_prev_hash.get_value().or(Some(true)).unwrap());
         
         // 2. Check if current hash <= target
         //
@@ -244,13 +244,13 @@ where
 
         // less than check
         let r_curr_hash_targ = median::less_than(cs.namespace(|| "Is PoW consensus achieved?"), &curr_hash, &target, 224usize).unwrap();
-        assert!(r_curr_hash_targ.get_value().unwrap());
+        assert!(r_curr_hash_targ.get_value().or(Some(true)).unwrap());
 
         // 3. Check if timestamp of the current block is greater than the median of previous 11 timestamps
         //
         let mut times_vec: Vec<u32> = Vec::new(); 
         for i in 1..=11 {
-            let timestamp = z_i[i].get_value().unwrap();
+            let timestamp = z_i[i].get_value().or(Some(F::ONE)).unwrap();
             let (_s, time32) = f_to_nat(&timestamp).to_u32_digits();
             times_vec.push(time32[0]);
         }
@@ -260,7 +260,7 @@ where
 
         // verify median
         let r_median = median::verify_median_timestamp(cs.namespace(|| "median verify"), &mut times_vec, median).unwrap();
-        assert!(r_median.get_value().unwrap());
+        assert!(r_median.get_value().or(Some(true)).unwrap());
 
         // check if median < current timestamp
         // Taking the example of block no. 123456
@@ -276,7 +276,7 @@ where
         let median_fe = AllocatedNum::alloc(cs.namespace(|| "median"), || Ok(F::from(median as u64))).unwrap();
         let curr_timestamp = AllocatedNum::alloc(cs.namespace(|| "current timestamp"), || Ok(F::from(n_time_endian))).unwrap();
         let r_time = median::less_than(cs.namespace(|| "valid timestamp"), &median_fe, &curr_timestamp, 32usize).unwrap();
-        assert!(r_time.get_value().unwrap());
+        assert!(r_time.get_value().or(Some(true)).unwrap());
 
         // 4. Total work addition
         //
@@ -326,7 +326,7 @@ where
 
         let start_time_epoch = z_i[13].clone();
         let target_calc = difficulty_update::calculate_difficulty_update(cs.namespace(|| "target calculated"), &z_i[12], &z_i[13]).unwrap();
-        let bigint_tar = target_calc.value.unwrap();
+        let bigint_tar = target_calc.value.unwrap_or_default();
         let (_s2_calc, target_u64_calc) = bigint_tar.to_u64_digits();
 
         let calculated_target = AllocatedNum::alloc(cs.namespace(|| "target updated"), || {
@@ -407,7 +407,7 @@ where
         //
         // If the counter i.e z_i[14] == 2015, then z_out[14] = 0. Else, z_out[14] = z_i[14] + 1.
         let mut z_out: Vec<AllocatedNum<F>> = Vec::new();
-        z_out[0] = curr_hash.clone();
+        z_out.push(curr_hash.clone()); // z_out[0]
         cs.enforce(
             || "current SHA256d hash out", 
             |lc| lc,
@@ -417,7 +417,7 @@ where
 
         
         for i in 1..=10 {
-            z_out[i] = z_i[i+1].clone();
+            z_out.push(z_i[i+1].clone()); // z_out[1..=10]
 
             cs.enforce(
                 || format!("timestamp out {}", i), 
@@ -427,7 +427,7 @@ where
             );
         }
 
-        z_out[11] = curr_timestamp.clone();
+        z_out.push(curr_timestamp.clone()); // z_out[11]
         cs.enforce(
             || "current timestamp out", 
             |lc| lc,
@@ -435,7 +435,7 @@ where
             |lc| lc + z_out[11].get_variable() - curr_timestamp.get_variable(),
         );
 
-        z_out[12] = target.clone();
+        z_out.push(target.clone()); // z_out[12]
         cs.enforce(
             || "current target out", 
             |lc| lc,
@@ -443,7 +443,7 @@ where
             |lc| lc + z_out[12].get_variable() - target.get_variable(),
         );
 
-        z_out[13] = start_time_epoch.clone();
+        z_out.push(start_time_epoch.clone()); // z_out[13]
         cs.enforce(
             || "current start time epoch out", 
             |lc| lc,
@@ -451,12 +451,13 @@ where
             |lc| lc + z_out[13].get_variable() - start_time_epoch.get_variable(),
         );
 
-        z_out[14] = AllocatedNum::alloc(cs.namespace(|| "target counter"), || {
+        // z_out[14]
+        z_out.push(AllocatedNum::alloc(cs.namespace(|| "target counter"), || {
             let mut prev_ctr = z_i[14].get_value().unwrap();
 
             prev_ctr.add_assign(F::ONE);
             Ok(prev_ctr)
-        }).unwrap();
+        }).unwrap());
 
         cs.enforce(
             || "z_out[14] = z_i[14] + 1", 
@@ -466,13 +467,14 @@ where
         );
 
         // total work
-        z_out[15] = AllocatedNum::alloc(cs.namespace(|| "total work"), || {
+        // z_out[15]
+        z_out.push(AllocatedNum::alloc(cs.namespace(|| "total work"), || {
             let prev_total = z_i[15].get_value().unwrap();
             let mut curr_work = block_work.get_value().unwrap();
 
             curr_work.add_assign(&prev_total);
             Ok(curr_work)
-        }).unwrap();
+        }).unwrap());
 
         cs.enforce(
             || "z_out[15] = z_i[15] + block_work", 

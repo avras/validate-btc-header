@@ -54,7 +54,7 @@ CS: ConstraintSystem<Scalar>,
             // Ok(Scalar::from(signum))
         }).unwrap();
         
-        let eq_bit = AllocatedBit::alloc(cs.namespace(|| format!("equality {}", i)), Some(res_eq.get_value().unwrap())).unwrap();
+        let eq_bit = AllocatedBit::alloc(cs.namespace(|| format!("equality {}", i)), res_eq.get_value())?;
         let lt_bit_mul2 = AllocatedNum::alloc(cs.namespace(|| format!("less than {}", i)), || Ok(Scalar::from(2*(res_lt.get_value().unwrap() as u64)))).unwrap();
         // Constrain:
         // (1 - res_eq) * (1 - 2 * res_lt) == delta_sign
