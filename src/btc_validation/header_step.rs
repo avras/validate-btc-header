@@ -35,6 +35,82 @@ where
     }
 }
 
+
+impl<F> BlockHeader<F>
+where
+    F: PrimeField + PrimeFieldBits,
+{
+    // Produces the intermediate blocks when a message is hashed
+    pub fn new_blocks(input: Vec<[u64;10]>) -> Vec<Self> {
+        // let block_seq = sha256_msg_block_sequence(input);
+        input
+            .into_iter()
+            .map(|b| BlockHeader {
+                block_head: b,
+                marker: PhantomData,
+            })
+            .collect()
+    }
+
+
+    pub fn initial_z_i_scalars() -> Vec<F>
+    {
+        let mut initial_z = Vec::new();
+
+        // let n = 0x0000000000000b60bc96a44724fd72daf9b92cf8ad00510b5224c6253ac40095;
+        let curr_hash = F::from_str_vartime("18283544428642297129396529020735695233361821945456783020785813").unwrap();
+        initial_z.push(curr_hash);
+
+        // previous 11 timestamps
+        let t1 = F::from_str_vartime("1305191152").unwrap(); //123445
+        initial_z.push(t1);
+        
+        let t2 = F::from_str_vartime("1305191688").unwrap(); //123446
+        initial_z.push(t2);
+        
+        let t3 = F::from_str_vartime("1305193319").unwrap(); //123447
+        initial_z.push(t3);
+        
+        let t4 = F::from_str_vartime("1305194571").unwrap(); //123448
+        initial_z.push(t4);
+        
+        let t5 = F::from_str_vartime("1305194986").unwrap(); //123449
+        initial_z.push(t5);
+        
+        let t6 = F::from_str_vartime("1305195947").unwrap(); //123450
+        initial_z.push(t6);
+        
+        let t7 = F::from_str_vartime("1305197900").unwrap(); //123451
+        initial_z.push(t7);
+        
+        let t8 = F::from_str_vartime("1305199436").unwrap(); //123452
+        initial_z.push(t8);
+        
+        let t9 = F::from_str_vartime("1305200301").unwrap(); //123453
+        initial_z.push(t9);
+        
+        let t10 = F::from_str_vartime("1305200460").unwrap(); //123454
+        initial_z.push(t10);
+        
+        let t11 = F::from_str_vartime("1305200584").unwrap(); //123455
+        initial_z.push(t11);
+
+        let target = F::from_str_vartime("171262555713783851185422181139260521316022447660158187451973632").unwrap();
+        initial_z.push(target);
+
+        let start_time_epoch = F::from(1304975844u64);
+        initial_z.push(start_time_epoch);
+
+        let counter = F::from(480u64);
+        initial_z.push(counter);
+
+        let chain_work = F::ZERO;
+        initial_z.push(chain_work);
+
+        initial_z
+    }
+}
+
 impl<F> StepCircuit<F> for BlockHeader <F>
 where
     F: PrimeField + PrimeFieldBits,
@@ -50,16 +126,27 @@ where
     ) -> Result<Vec<AllocatedNum<F>>, SynthesisError> {
         let header = self.block_head.to_vec();
         let z_i = (*z).to_vec();
+        
+        // println!("{}", header[0]);
+        // println!("{}", header[1]);
+        // println!("{}",header[2]);
+        // println!("{}", header[3]);
+        // let hash_s = z_i[1].get_value().unwrap();
+        // let (_s1000, hash32) = f_to_nat(&hash_s).to_u32_digits();
+        // for (_i, h) in hash32.iter().enumerate() {
+        //     println!("{}", *h);
+        // }
+        
 
         // 1. Check if prevHash from z and prev_hash_from_curr_block are equal 
         //
         // Taking the example of block no. 123456
         // 0x010000009500c43a 25c624520b5100ad f82cb9f9da72fd24 47a496bc600b0000 000000006cd86237 0395dedf1da2841c cda0fc489e3039de 5f1ccddef0e83499 1a65600ea6c8cb4d b3936a1ae3143991
-        // here 0x9500c43a25c624520b5100adf82cb9f9da72fd2447a496bc600b000000000000 is the prevhash
+        // here 0x9500c43a25c624520b5100adf82cb9f9da72fd2447a496bc600b000000000000 is the prevhash (0000000000000b60bc96a44724fd72daf9b92cf8ad00510b5224c6253ac40095)
 
         let mut prev_hash_from_curr_block_vec: Vec<u64> = Vec::new();
         for i in 0..4 {
-            let mut hash_vec = (header[i] % (1 << 32 as u64)) * (1<<32 as u64) + header[i+1] / (1 << 32 as u64);
+            let hash_vec = (header[i] % (1 << 32 as u64)) * (1<<32 as u64) + header[i+1] / (1 << 32 as u64);
             prev_hash_from_curr_block_vec.push(hash_vec);
         }
 
@@ -154,7 +241,7 @@ where
 
             Ok(sum)
         }).unwrap();
-        
+
         // less than check
         let r_curr_hash_targ = median::less_than(cs.namespace(|| "Is PoW consensus achieved?"), &curr_hash, &target, 224usize).unwrap();
         assert!(r_curr_hash_targ.get_value().unwrap());
@@ -226,6 +313,8 @@ where
         // 5. Target update
         //
         // Either the counter i.e. z_i[14] == 0 or target from z_i is equal to curr_target
+        // The counter z_i[14] has value r for (2016q + r)th block
+
         // Constrain allocation:
         // 0 = (target - z_i[12]) * z_i[14]
         cs.enforce(
@@ -235,40 +324,95 @@ where
             |lc| lc,
         );
 
-        let mut start_time_epoch = z_i[13].clone();
+        let start_time_epoch = z_i[13].clone();
+        let target_calc = difficulty_update::calculate_difficulty_update(cs.namespace(|| "target calculated"), &z_i[12], &z_i[13]).unwrap();
+        let bigint_tar = target_calc.value.unwrap();
+        let (_s2_calc, target_u64_calc) = bigint_tar.to_u64_digits();
+
+        let calculated_target = AllocatedNum::alloc(cs.namespace(|| "target updated"), || {
+            let exponent = 8 * (b0 - 3) as usize;
+            let ls_tar = F::from_u128(((target_u64_calc[0] as u128) + (target_u64_calc[1] as u128) << 64) >> exponent);
+            let ms64b = F::from_u128((target_u64_calc[2] as u128) << 64);
+            let mut pow_2 = F::from_u128((1 << 64)>>exponent);
+
+            pow_2.mul_assign(&ms64b);
+            pow_2.add_assign(&ls_tar);
+
+            let exp_2 = F::from_u128(1u128 << exponent);
+            pow_2.mul_assign(&exp_2);
+
+            Ok(pow_2)
+        }).unwrap();
+
+        // let _r = BigNat::equals(cs.namespace(|| "verify target update"), &target, &calculated_target).unwrap();
         
-        // Either the counter z_i[14] is non-zero or curr_target = z_i[12] * t_sum / (2016*10*60)
-        if z_i[14].get_value().unwrap().is_zero().unwrap_u8() == 1 {
-            let t_sum = z_i[13].get_value().unwrap();
-            let t_sum_big = f_to_nat(&t_sum);
+        // Either the counter z_i[14] is non-zero or curr_target = calc_target = z_i[12] * t_sum / (2016*10*60)
+        let delta_inv = AllocatedNum::alloc(cs.namespace(|| "delta_inv"), || {
+            let delta = z_i[14].get_value().unwrap();
 
-            let (_s3, t_sum32) = t_sum_big.to_u32_digits();
+            if delta.is_zero().unwrap_u8() == 1 {
+                Ok(F::ONE) // we can return any number here, it doesn't matter
+            } else {
+                Ok(delta.invert().unwrap())
+            }
+        })?;
 
-            let targ_big = f_to_nat(&(target.get_value().unwrap()));
-            let (_s4, targ_u64) = targ_big.to_u64_digits();
-            let t_low = (targ_u64[1] as u128) << 64 + (targ_u64[0] as u128);
-            let t_up = (targ_u64[3] as u128) << 64 + (targ_u64[2] as u128);
+        // Allocate `t = z_i[14] * delta_inv`
+        // If `z_i[14]` is non-zero, `t` will equal 1
+        // If `z_i[14]` is zero, `t` will equal 0
 
-            let z_i_big = f_to_nat(&(z_i[12].get_value().unwrap()));
-            let (_s5, z_i_u64) = z_i_big.to_u64_digits();
-            let z_low = (z_i_u64[1] as u128) << 64 + (z_i_u64[0] as u128);
-            let z_up = (z_i_u64[3] as u128) << 64 + (z_i_u64[2] as u128); 
+        let t = AllocatedNum::alloc(cs.namespace(|| "t"), || {
+            let mut tmp = z_i[14].get_value().unwrap();
+            tmp.mul_assign(&(delta_inv.get_value().unwrap()));
 
-            difficulty_update::verify_difficulty_update(cs.namespace(|| "verify target update"), t_up,t_low, z_up, z_low, t_sum32[0]);
+            Ok(tmp)
+        })?;
 
-            start_time_epoch = curr_timestamp.clone();
-        }
+        // Constrain allocation:
+        // t = z_i[14] * delta_inv
+        cs.enforce(
+            || "t = z_i[14] * delta_inv",
+            |lc| lc + z_i[14].get_variable(),
+            |lc| lc + delta_inv.get_variable(),
+            |lc| lc + t.get_variable(),
+        );
+
+        // Constrain:
+        // z_i[14] * (t - 1) == 0
+        // This enforces that correct `delta_inv` was provided,
+        // and thus `t` is 1 if `z_i[14]` is non zero
+        cs.enforce(
+            || "z_i[14] * (t - 1) == 0",
+            |lc| lc + z_i[14].get_variable(),
+            |lc| lc + t.get_variable() - CS::one(),
+            |lc| lc,
+        );
+
+        // Constrain:
+        // (curr_target - calc_target) * (t - 1) == 0
+        // This enforces that correct `delta_inv` was provided,
+        // and thus `t` is 1 if `z_i[14]` is non zero
+        cs.enforce(
+            || "(curr_target - calc_target) * (t - 1) == 0",
+            |lc| lc + target.get_variable() - calculated_target.get_variable(),
+            |lc| lc + t.get_variable() - CS::one(),
+            |lc| lc,
+        );
+
+        
+        // Either the counter z_i[14] is not equal to 2015 or start_time_epoch = z_i[13]
+
 
         // 6. z_out
         //
         // If the counter i.e z_i[14] == 2015, then z_out[14] = 0. Else, z_out[14] = z_i[14] + 1.
         let mut z_out: Vec<AllocatedNum<F>> = Vec::new();
-        z_out.push(curr_hash);
+        z_out[0] = curr_hash.clone();
         cs.enforce(
             || "current SHA256d hash out", 
-            |lc| lc + curr_hash.get_variable(),
-            |lc| lc + CS::one(),
-            |lc| lc + z_out[0].get_variable(),
+            |lc| lc,
+            |lc| lc,
+            |lc| lc + z_out[0].get_variable() - curr_hash.get_variable(),
         );
 
         
@@ -277,34 +421,34 @@ where
 
             cs.enforce(
                 || format!("timestamp out {}", i), 
-                |lc| lc + z_i[i + 1].get_variable(),
-                |lc| lc + CS::one(),
-                |lc| lc + z_out[i].get_variable(),
+                |lc| lc,
+                |lc| lc,
+                |lc| lc + z_out[i].get_variable() - z_i[i + 1].get_variable(),
             );
         }
 
         z_out[11] = curr_timestamp.clone();
         cs.enforce(
             || "current timestamp out", 
-            |lc| lc + curr_timestamp.get_variable(),
-            |lc| lc + CS::one(),
-            |lc| lc + z_out[11].get_variable(),
+            |lc| lc,
+            |lc| lc,
+            |lc| lc + z_out[11].get_variable() - curr_timestamp.get_variable(),
         );
 
         z_out[12] = target.clone();
         cs.enforce(
             || "current target out", 
-            |lc| lc + target.get_variable(),
-            |lc| lc + CS::one(),
-            |lc| lc + z_out[12].get_variable(),
+            |lc| lc,
+            |lc| lc,
+            |lc| lc + z_out[12].get_variable() - target.get_variable(),
         );
 
         z_out[13] = start_time_epoch.clone();
         cs.enforce(
             || "current start time epoch out", 
-            |lc| lc + start_time_epoch.get_variable(),
-            |lc| lc + CS::one(),
-            |lc| lc + z_out[13].get_variable(),
+            |lc| lc,
+            |lc| lc,
+            |lc| lc + z_out[13].get_variable() - start_time_epoch.get_variable(),
         );
 
         z_out[14] = AllocatedNum::alloc(cs.namespace(|| "target counter"), || {
